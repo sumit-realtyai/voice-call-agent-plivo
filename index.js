@@ -1,42 +1,74 @@
-import { Client } from "plivo";
-import WebSocket, { WebSocketServer } from 'ws';
-import express from "express";
-import http from 'http'
-import { SessionUpdate } from "./sessionUpdate.js";
-import dotenv from "dotenv";
+// import dotenv from 'dotenv';
+// import express from 'express';
+// import http from 'http';
+// import WebSocket, { WebSocketServer } from 'ws';
+// import { GoogleGenerativeAI } from '@google/generative-ai'; // Import Gemini API SDK
 
+// dotenv.config();
+
+// const app = express();
+// app.use(express.json());
+// app.use(express.urlencoded({ extended: true }));
+
+// const server = http.createServer(app);
+// const wss = new WebSocketServer({ noServer: true });
+// const PORT = 5000;
+// const { GEMINI_API_KEY } = process.env;
+
+// const genAI = new GoogleGenerativeAI(GEMINI_API_KEY);
+
+
+
+
+
+
+
+
+const WebSocket = require('ws');
+const { WebSocketServer } = require('ws');
+const { aiplatform } = require('@google-cloud/aiplatform');
+
+const dotenv = require('dotenv');
+const express = require('express');
 
 dotenv.config();
-const app = express()
-app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
 
+
+// --- Authentication ---
+const projectId = 'plivo-gemini-integration'; // **REPLACE WITH YOUR PROJECT ID**
+const location = 'us-central1'; // Or your preferred location
+const keyFilename = process.env.GOOGLE_APPLICATION_CREDENTIALS; // **REPLACE WITH YOUR KEY FILE PATH**
+
+// Initialize Vertex AI client
+const vertexAI = new aiplatform.VertexAI({ project: projectId, location,credentials: require(keyFilename) });
+
+
+async function getBearerToken() {
+  const credentials = await vertexAI.auth.getAccessToken();
+  return credentials.token;
+}
+
+// --- Express and WebSocket Server ---
+const app = express();
+const port = process.env.PORT || 3000;
 const server = http.createServer(app);
 const wss = new WebSocketServer({ noServer: true });
-let client;
-const PORT = 5000;
 
-const { OPENAI_API_KEY } = process.env
 
-SessionUpdate.session.instructions = 'You are a helpful and a friendly AI assistant who loves to chat about anything the user is interested about.';
-SessionUpdate.session.voice = 'alloy';
 
-app.get('/', (req, res) => {  
-  res.send('Hello World!')
-})
-
-app.post("/webhook", (request, reply) => {
-  console.log('host is ', request.host)
+// --- Plivo Webhook ---
+app.post("/webhook", (req, res) => {
   const PlivoXMLResponse = `<?xml version="1.0" encoding="UTF-8"?>
-                              <Response>
-                                  <Stream streamTimeout="86400" keepCallAlive="true" bidirectional="true" contentType="audio/x-mulaw;rate=8000" audioTrack="inbound" >
-                                      ws://${request.host}/media-stream
-                                  </Stream>
-                              </Response>`;
+    <Response>
+      <Speak>Hi there! You are now connected. How can I help you today?</Speak>
+      <Stream streamTimeout="86400" keepCallAlive="true" bidirectional="true" contentType="audio/x-mulaw;rate=8000" audioTrack="inbound" >
+        ws://${req.hostname}/media-stream
+      </Stream>
+    </Response>`;
+  res.type('text/xml').send(PlivoXMLResponse);
+});
 
-  reply.type('text/xml').send(PlivoXMLResponse);
-})
-
+// --- WebSocket Upgrade ---
 server.on('upgrade', (request, socket, head) => {
   if (request.url === '/media-stream') {
     wss.handleUpgrade(request, socket, head, (ws) => {
@@ -47,164 +79,117 @@ server.on('upgrade', (request, socket, head) => {
   }
 });
 
-const sendSessionUpdate = (realtimeWS) => {
-  realtimeWS.send(JSON.stringify(SessionUpdate))
-}
+// --- Gemini and Plivo WebSocket Handling ---
+const HOST = "us-central1-aiplatform.googleapis.com";
+const SERVICE_URL = `wss://${HOST}/ws/google.cloud.aiplatform.v1beta1.LlmBidiService/BidiGenerateContent`;
 
-const itemForFunctionOutput = (arg, itemId, callId) => {
-  const sum = parseInt(arg.num1) + parseInt(arg.num2)
-  const conversationItem = {
-    type: "conversation.item.create",
-    previous_item_id: null,
-    item: {
-      id: itemId,
-      type: "function_call_output",
-      call_id: callId,
-      output: sum.toString(),
-    }
+wss.on('connection', async (plivoWs) => {
+  console.log('Plivo Client connected to WebSocket');
+
+  try {
+    const bearerToken = await getBearerToken();
+
+    const geminiWs = new WebSocket(SERVICE_URL, {
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${bearerToken}`,
+      },
+    });
+
+    geminiWs.onopen = () => {
+      console.log("Connected to Gemini");
+    };
+
+    geminiWs.onmessage = (event) => {
+      try {
+        const geminiResponse = JSON.parse(event.data);
+
+        // --- Process Gemini Response (Using Python example) ---
+        if (geminiResponse.candidates && geminiResponse.candidates[0] && geminiResponse.candidates[0].content) {
+          const geminiAudio = geminiResponse.candidates[0].content;
+          plivoWs.send(Buffer.from(geminiAudio, 'base64')); // Send back to Plivo
+        } else {
+          console.error("Unexpected Gemini Response:", JSON.stringify(geminiResponse, null, 2));
+          plivoWs.send(generateSilence());
+        }
+
+      } catch (geminiError) {
+        console.error("Error processing Gemini response:", geminiError);
+        plivoWs.send(generateSilence());
+      }
+    };
+
+    geminiWs.onerror = (error) => {
+      console.error("Gemini WebSocket Error:", error);
+      plivoWs.send(generateSilence());
+      geminiWs.close();
+    };
+
+    geminiWs.onclose = () => {
+      console.log("Gemini WebSocket closed");
+      plivoWs.close();
+    };
+
+    plivoWs.on('message', (message) => { // Audio from Plivo
+      try {
+        const geminiRequest = {
+          instances: [{
+            audio: {
+              content: message.toString('base64'), // Send directly (no conversion)
+            },
+          }],
+          parameters: {}, // Add parameters as needed
+        };
+
+        geminiWs.send(JSON.stringify(geminiRequest));
+      } catch (plivoError) {
+        console.error("Error processing Plivo audio:", plivoError);
+        geminiWs.close();
+        plivoWs.send(generateSilence());
+      }
+    });
+
+    plivoWs.on('close', () => {
+      console.log('Plivo Client disconnected');
+      geminiWs.close();
+    });
+
+    plivoWs.on('error', (error) => {
+        console.error("Plivo WebSocket Error:", error);
+        geminiWs.close();
+    })
+
+
+  } catch (error) {
+    console.error("Error handling Plivo WebSocket connection:", error);
+    plivoWs.send(generateSilence());
+    plivoWs.close();
   }
-  return conversationItem;
-}
+});
 
-const startRealtimeWSConnection = (plivoWS) => {
-  const realtimeWS = new WebSocket('wss://api.openai.com/v1/realtime?model=gpt-4o-realtime-preview-2024-10-01', {
-    headers: {
-      "Authorization": "Bearer " + OPENAI_API_KEY,
-      "OpenAI-Beta": "realtime=v1",
-    }
-  })
-
-  realtimeWS.on('open', () => {
-    console.log('open ai websocket connected')
-    setTimeout(() => {
-      sendSessionUpdate(realtimeWS)
-    }, 250)
-  })
-
-  realtimeWS.on('close', () => {
-    console.log('Disconnected from the openAI Realtime API')
-  });
-
-  realtimeWS.on('error', (error) => {
-    console.log('Error in the OpenAi Websocket: ', error)
-  })
-
-  realtimeWS.on('message', (message) => {
-    try {
-      const response = JSON.parse(message)
-
-      switch (response.type) {
-        case 'session.updated':
-          console.log('session updated successfully')
-          break;
-        case 'input_audio_buffer.speech_started':
-          console.log('speech is started')
-          const clearAudioData = {
-            "event": "clearAudio",
-            "stream_id": plivoWS.streamId
-          }
-          plivoWS.send(JSON.stringify(clearAudioData))
-
-          const data = {
-            "type": "response.cancel"
-          }
-          realtimeWS.send(JSON.stringify(data))
-          break;
-        case 'error':
-          console.log('error received in response ', response)
-          break;
-        case 'response.audio.delta':
-          const audioDelta = {
-            event: 'playAudio',
-            media: {
-              contentType: 'audio/x-mulaw',
-              sampleRate: 8000,
-              payload: Buffer.from(response.delta, 'base64').toString('base64')
-            }
-          }
-          plivoWS.send(JSON.stringify(audioDelta));
-          break;
-        case 'response.function_call_arguments.done':
-          if (response.name === 'calc_sum') {
-            const output = itemForFunctionOutput(JSON.parse(response.arguments), response.item_id, response.call_id)
-            realtimeWS.send(JSON.stringify(output))
-
-            const generateResponse = {
-              type: "response.create",
-              response: {
-                modalities: ["text", "audio"],
-                temperature: 0.8,
-                instructions: 'Please share the sum from the function call output with the user'
-              }
-            }
-
-            realtimeWS.send(JSON.stringify(generateResponse))
-          }
-          break;
-        default:
-          console.log('Response received from the Realtime API is ', response.type)
-      }
-    } catch (error) {
-      console.error('Error processing openAI message: ', error, 'Raw message: ', message)
-    }
-  });
-  return realtimeWS
-}
-
-wss.on('connection', (connection) => {
-  console.log('Client connected to WebSocket');
-
-  // start the openAI realtime websocket connection
-  const realtimeWS = startRealtimeWSConnection(connection);
-
-  connection.on('message', (message) => {
-    try {
-      const data = JSON.parse(message)
-      switch (data.event) {
-        case 'media':
-          if (realtimeWS && realtimeWS.readyState === WebSocket.OPEN) {
-            const audioAppend = {
-              type: 'input_audio_buffer.append',
-              audio: data.media.payload
-            }
-
-            realtimeWS.send(JSON.stringify(audioAppend))
-          }
-          break;
-        case 'start':
-          console.log('Incoming stream has started with stream id: ', data.start.streamId)
-          connection.streamId = data.start.streamId
-          break;
-        default:
-          console.log('Received non-media evengt: ', data.event)
-          break
-      }
-    } catch (error) {
-      console.error('Error parsing message: ', error, 'Message: ', message)
-    }
-  });
-
-  connection.on('close', () => {
-    if (realtimeWS.readyState === WebSocket.OPEN) realtimeWS.close();
-    console.log('client disconnected')
-  });
-
-
+server.listen(port, () => { 
+  console.log(`Server started on port ${port}`);
 });
 
 
-server.listen(PORT, () => {
-  // if (err) throw err
-  console.log('server started on port 5000')
-  // client = new Client(process.env.PLIVO_AUTH_ID, process.env.PLIVO_AUTH_TOKEN)
-  // let response = client.calls.create(
-  //   process.env.PLIVO_FROM_NUMBER,
-  //   process.env.PLIVO_TO_NUMBER,
-  //   process.env.PLIVO_ANSWER_XML,
-  //   { answerMethod: "GET" })
-  //   .then((call) => {
-  //     console.log('call created ', call)
-  //   }).catch((e) => {
-  //     console.log('error is ', e)
-  //   })
-})
+// --- Generate Silence ---
+function generateSilence() {
+  // Generate silence in the COMPATIBLE format (mu-law or linear PCM)
+  return Buffer.from([0]); // Example: very short silence - adjust as needed
+}
+
+// --- WebSocket Client (Example - adapt as needed) ---
+// (This would be in a separate file or browser code)
+/*
+const ws = new WebSocket('ws://your-server-address');
+
+ws.onopen = async () => {
+  const token = await getBearerToken();
+  ws.send(JSON.stringify({ bearer_token: token }));
+  // ... (Code to get microphone audio and send to server)
+};
+
+ws.onmessage = event => {
+  // ... (Handle messages from the server)
+};
+*/
