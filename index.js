@@ -1,8 +1,10 @@
-// import dotenv from 'dotenv';
-// import express from 'express';
-// import http from 'http';
-// import WebSocket, { WebSocketServer } from 'ws';
-// import { GoogleGenerativeAI } from '@google/generative-ai'; // Import Gemini API SDK
+// import WebSocket, { WebSocketServer } from "ws";
+// import express from "express";
+// import http from "http";
+// import dotenv from "dotenv";
+// import { Buffer } from "buffer";
+// import fs from "fs";
+// const audioStream = fs.createWriteStream("plivo_audio.raw");
 
 // dotenv.config();
 
@@ -13,183 +15,302 @@
 // const server = http.createServer(app);
 // const wss = new WebSocketServer({ noServer: true });
 // const PORT = 5000;
-// const { GEMINI_API_KEY } = process.env;
 
-// const genAI = new GoogleGenerativeAI(GEMINI_API_KEY);
+// const GOOGLE_API_KEY = process.env.NEXT_PUBLIC_GEMINI_API_KEY;
+// const GOOGLE_WS_URL = `wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1alpha.GenerativeService.BidiGenerateContent?key=${GOOGLE_API_KEY}`;
+
+// app.get("/", (req, res) => {
+//   res.send("Hello World!");
+// });
+
+// app.post("/webhook", (req, res) => {
+//   const PlivoXMLResponse = `<?xml version="1.0" encoding="UTF-8"?>
+//                             <Response>
+//                               <Speak>Hi there! You are now connected. How can I help you today?</Speak>
+//                               <Stream streamTimeout="86400" keepCallAlive="true" bidirectional="true" contentType="audio/x-mulaw;rate=8000" audioTrack="inbound">
+//                                   ws://${req.hostname}/media-stream
+//                               </Stream>
+//                             </Response>`;
+//   res.type("text/xml").send(PlivoXMLResponse);
+// });
+
+// server.on("upgrade", (request, socket, head) => {
+//   if (request.url === "/media-stream") {
+//     wss.handleUpgrade(request, socket, head, (ws) => {
+//       wss.emit("connection", ws, request);
+//     });
+//   } else {
+//     socket.destroy();
+//   }
+// });
+
+// const startGoogleWebSocket = (plivoWS) => {
+//   const googleWS = new WebSocket(GOOGLE_WS_URL);
+
+//   let isSetupComplete = false; // Track setup completion
+
+//   googleWS.on("open", () => {
+//     console.log("✅ Connected to Google Multimodal Live API");
+
+//     // Send Initial Setup
+//     googleWS.send(
+//       JSON.stringify({
+//         setup: {
+//           model: "models/gemini-2.0-flash-exp",
+//           generation_config: { response_modalities: ["AUDIO"] },
+//         },
+//       })
+//     );
+//   });
+
+//   googleWS.on("message", (message) => {
+//     try {
+//       const response = JSON.parse(message);
+//       console.log("🔹 Full Google API Response:", JSON.stringify(response, null, 2));
+
+//       if (response.setupComplete) {
+//         console.log("✅ Google Setup Complete. Ready to send audio.");
+//         isSetupComplete = true;
+//         return;
+//       }
+
+//       if (response.serverContent?.modelTurn?.parts) {
+//         const audioData = response.serverContent.modelTurn.parts.find(
+//           (part) => part.inlineData?.data
+//         );
+
+//         if (audioData) {
+//           console.log("🔹 Sending AI-generated audio to Plivo...");
+
+//           const audioDelta = {
+//             event: "playAudio",
+//             media: {
+//               contentType: "audio/x-mulaw",
+//               sampleRate: 8000,
+//               payload: audioData.inlineData.data,
+//             },
+//           };
+
+//           plivoWS.send(JSON.stringify(audioDelta));
+//         } else {
+//           console.log("⚠️ No audio data found in response.");
+//         }
+//       }
+//     } catch (error) {
+//       console.error("❌ Error processing Google response:", error);
+//     }
+//   });
+
+//   googleWS.on("close", (code, reason) => {
+//     console.log(`❌ Disconnected from Google API. Code: ${code}, Reason: ${reason.toString()}`);
+//   });
+
+//   googleWS.on("error", (error) => {
+//     console.error("❌ Error in Google WebSocket:", error);
+//   });
+
+//   return { googleWS, isSetupComplete };
+// };
+
+// wss.on("connection", (connection) => {
+//   console.log("✅ Client connected to WebSocket");
+//   let { googleWS, isSetupComplete } = startGoogleWebSocket(connection);
+
+//   connection.on("message", (message) => {
+
+//     try {
+//       const data = JSON.parse(message);
+  
+//       if (data.event === "start") {
+//         console.log("✅ Plivo Stream Started. Stream ID:", data.start.stream_id);
+//         connection.streamId = data.start.stream_id;
+//       }
+  
+//       if (data.event === "media") {
+//         console.log(`🎤 Received audio from Plivo. Stream ID: ${connection.streamId || "unknown"}`);
+//         console.log("🔹 Audio Payload Length:", data.media.payload.length);
+  
+//         // Decode and write to file
+//         const decodedAudio = Buffer.from(data.media.payload, "base64");
+//         audioStream.write(decodedAudio);
+  
+//         console.log("🔹 Saved audio to plivo_audio.raw");
+//       }
+//     } catch (error) {
+//       console.error("❌ Error parsing message:", error);
+//     }
+
+//     try {
+//       const data = JSON.parse(message);
+//        if (data.event === "media") {
+//       console.log("🎤 Received audio from Plivo. Stream ID:", data.stream_id);
+//       console.log("🔹 Audio Payload Length:", data.media.payload.length);
+
+//       // Save first few bytes of audio as base64 (for debugging)
+//       console.log("🔹 Audio Sample:", data.media.payload.substring(0, 50)); 
+//     }
+
+//       if (data.event === "media" && googleWS.readyState === WebSocket.OPEN) {
+//         if (!isSetupComplete) {
+//           console.log("⚠️ Google setup not complete, waiting...");
+//           return;
+//         }
+
+//         console.log("🔹 Forwarding audio from Plivo to Google...");
+
+//         googleWS.send(
+//           JSON.stringify({
+//             realtime_input: {
+//               media_chunks: [
+//                 {
+//                   mime_type: "audio/pcm;rate=24000",
+//                   data: data.media.payload,
+//                 },
+//               ],
+//             },
+//           })
+//         );
+//       }
+//     } catch (error) {
+//       console.error("❌ Error parsing message:", error);
+//     }
+//   });
+
+//   connection.on("close", () => {
+//     if (googleWS.readyState === WebSocket.OPEN) googleWS.close();
+//     console.log("❌ Client disconnected");
+//   });
+// });
+
+// server.listen(PORT, () => {
+//   console.log(`🚀 Server started on port ${PORT}`);
+// });
 
 
 
 
 
 
-
-
-const WebSocket = require('ws');
-const { WebSocketServer } = require('ws');
-const { aiplatform } = require('@google-cloud/aiplatform');
-
-const dotenv = require('dotenv');
-const express = require('express');
-
+import express from 'express';
+// import  createCall from './twilio-makecall.js';
+import { connectToDatabase } from './src/config/mongoose-connect.js';
+import { assistantRequest, endCallReport } from './src/controllers/voiceCall.controller.js';
+import twilio from 'twilio';
+import dotenv from 'dotenv';
 dotenv.config();
 
-
-// --- Authentication ---
-const projectId = 'plivo-gemini-integration'; // **REPLACE WITH YOUR PROJECT ID**
-const location = 'us-central1'; // Or your preferred location
-const keyFilename = process.env.GOOGLE_APPLICATION_CREDENTIALS; // **REPLACE WITH YOUR KEY FILE PATH**
-
-// Initialize Vertex AI client
-const vertexAI = new aiplatform.VertexAI({ project: projectId, location,credentials: require(keyFilename) });
-
-
-async function getBearerToken() {
-  const credentials = await vertexAI.auth.getAccessToken();
-  return credentials.token;
-}
-
-// --- Express and WebSocket Server ---
 const app = express();
-const port = process.env.PORT || 3000;
-const server = http.createServer(app);
-const wss = new WebSocketServer({ noServer: true });
+const port = 5000;
 
+app.use(express.json());
+app.get('/', (req, res) => {  
+     console.log('hello world')
+     res.send('Hello World!')
+     });
 
+// app.post('/transfer', async (req, res) => {
+//      console.log('req body', req.body?.message?.call?.id);
+//      await createCall();
+//   res.send('transfer request received');   
+// })
 
-// --- Plivo Webhook ---
-app.post("/webhook", (req, res) => {
-  const PlivoXMLResponse = `<?xml version="1.0" encoding="UTF-8"?>
-    <Response>
-      <Speak>Hi there! You are now connected. How can I help you today?</Speak>
-      <Stream streamTimeout="86400" keepCallAlive="true" bidirectional="true" contentType="audio/x-mulaw;rate=8000" audioTrack="inbound" >
-        ws://${req.hostname}/media-stream
-      </Stream>
-    </Response>`;
-  res.type('text/xml').send(PlivoXMLResponse);
-});
+app.post('/msg-receive', async (req, res) => {
 
-// --- WebSocket Upgrade ---
-server.on('upgrade', (request, socket, head) => {
-  if (request.url === '/media-stream') {
-    wss.handleUpgrade(request, socket, head, (ws) => {
-      wss.emit('connection', ws, request);
-    });
-  } else {
-    socket.destroy();
-  }
-});
+     console.log('message received', req.body);
+     
+  res.send('message received');   
+})
 
-// --- Gemini and Plivo WebSocket Handling ---
-const HOST = "us-central1-aiplatform.googleapis.com";
-const SERVICE_URL = `wss://${HOST}/ws/google.cloud.aiplatform.v1beta1.LlmBidiService/BidiGenerateContent`;
+// Prepare the assistant response
 
-wss.on('connection', async (plivoWs) => {
-  console.log('Plivo Client connected to WebSocket');
+ 
 
-  try {
-    const bearerToken = await getBearerToken();
+ 
 
-    const geminiWs = new WebSocket(SERVICE_URL, {
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${bearerToken}`,
-      },
-    });
+ {
+  /**
+   * **database schema**
+   * // store all the structured data in the database
+   * // store the call recording in the database
+   * // store the call summary in the database
+   * // store the customer number
+   * // store the forwarded from number
+   * // store the call transcript
+   * // store the user extracted info like name, email, etc.
+  
+  
+  * **crete the UI to display the call summary,
+  * // call recording, call transcript, user extracted info, etc.**
 
-    geminiWs.onopen = () => {
-      console.log("Connected to Gemini");
-    };
-
-    geminiWs.onmessage = (event) => {
-      try {
-        const geminiResponse = JSON.parse(event.data);
-
-        // --- Process Gemini Response (Using Python example) ---
-        if (geminiResponse.candidates && geminiResponse.candidates[0] && geminiResponse.candidates[0].content) {
-          const geminiAudio = geminiResponse.candidates[0].content;
-          plivoWs.send(Buffer.from(geminiAudio, 'base64')); // Send back to Plivo
-        } else {
-          console.error("Unexpected Gemini Response:", JSON.stringify(geminiResponse, null, 2));
-          plivoWs.send(generateSilence());
-        }
-
-      } catch (geminiError) {
-        console.error("Error processing Gemini response:", geminiError);
-        plivoWs.send(generateSilence());
-      }
-    };
-
-    geminiWs.onerror = (error) => {
-      console.error("Gemini WebSocket Error:", error);
-      plivoWs.send(generateSilence());
-      geminiWs.close();
-    };
-
-    geminiWs.onclose = () => {
-      console.log("Gemini WebSocket closed");
-      plivoWs.close();
-    };
-
-    plivoWs.on('message', (message) => { // Audio from Plivo
-      try {
-        const geminiRequest = {
-          instances: [{
-            audio: {
-              content: message.toString('base64'), // Send directly (no conversion)
-            },
-          }],
-          parameters: {}, // Add parameters as needed
-        };
-
-        geminiWs.send(JSON.stringify(geminiRequest));
-      } catch (plivoError) {
-        console.error("Error processing Plivo audio:", plivoError);
-        geminiWs.close();
-        plivoWs.send(generateSilence());
-      }
-    });
-
-    plivoWs.on('close', () => {
-      console.log('Plivo Client disconnected');
-      geminiWs.close();
-    });
-
-    plivoWs.on('error', (error) => {
-        console.error("Plivo WebSocket Error:", error);
-        geminiWs.close();
-    })
-
-
-  } catch (error) {
-    console.error("Error handling Plivo WebSocket connection:", error);
-    plivoWs.send(generateSilence());
-    plivoWs.close();
-  }
-});
-
-server.listen(port, () => { 
-  console.log(`Server started on port ${port}`);
-});
-
-
-// --- Generate Silence ---
-function generateSilence() {
-  // Generate silence in the COMPATIBLE format (mu-law or linear PCM)
-  return Buffer.from([0]); // Example: very short silence - adjust as needed
+  */
 }
+app.post("/vapi-inbound", async (req, res) => {
+     try {
+       console.log('vapi-inbound', req.body.message.type);
 
-// --- WebSocket Client (Example - adapt as needed) ---
-// (This would be in a separate file or browser code)
-/*
-const ws = new WebSocket('ws://your-server-address');
+     if(req.body.message.type=="end-of-call-report") {
+        endCallReport(req,res);
+     }
+     else if(req.body.message.type== "assistant-request") {
+      assistantRequest(req,res);
+  
+  }
+      else {
+            // unwanted type atleast for now
+          }
+    
+     } catch (error) {
+          console.log('error', error);
+     }
+})
 
-ws.onopen = async () => {
-  const token = await getBearerToken();
-  ws.send(JSON.stringify({ bearer_token: token }));
-  // ... (Code to get microphone audio and send to server)
-};
+app.get("/forward", (req, res) => {
+  console.log('forward request received*************');
+    const xmlResponse = `<?xml version="1.0" encoding="UTF-8"?>
+        <Response>
+            <Dial callerId="+917015670076">+917415942766</Dial>
+        </Response>`;
+    res.type("text/xml");
+    res.send(xmlResponse);
+});
 
-ws.onmessage = event => {
-  // ... (Handle messages from the server)
-};
-*/
+app.post('/existing', async (req, res) => {
+  console.log('existing user');
+  res.send('existing user');
+});
+
+
+
+// Update Phone Number (PATCH /phone-number/:id)
+// const response = await fetch("https://api.vapi.ai/phone-number/b882572f-eff7-4647-9ba1-60610e80bcf3", {
+//      method: "PATCH",
+//      headers: {
+//        "Authorization": "Bearer 48af3017-c41d-4ec5-88de-e53491cdf69a",
+//        "Content-Type": "application/json"
+//      },
+//      body: JSON.stringify({
+//        "provider": "twilio",
+//        "server": {
+//          "url": "https://9048-2405-201-300c-22a-cfb-7584-cd81-541f.ngrok-free.app/vapi-inbound"
+//        }
+//      }),
+//    });
+   
+//    const body = await response.json();
+//    console.log(body);
+
+
+
+
+
+
+
+
+
+
+
+
+app.listen(port,() => {
+     console.log('server listening on port 5000')
+      connectToDatabase();
+    })

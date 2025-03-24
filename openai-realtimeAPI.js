@@ -1,4 +1,4 @@
-import { Client } from "plivo";
+
 import WebSocket, { WebSocketServer } from 'ws';
 import express from "express";
 import http from 'http'
@@ -13,7 +13,7 @@ app.use(express.urlencoded({ extended: true }));
 
 const server = http.createServer(app);
 const wss = new WebSocketServer({ noServer: true });
-let client;
+
 const PORT = 5000;
 
 const { OPENAI_API_KEY } = process.env
