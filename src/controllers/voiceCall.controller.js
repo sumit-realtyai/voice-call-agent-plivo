@@ -154,12 +154,12 @@ export const endCallReport =async (req,res) => {
     const {number,provider} = phoneNumber;
     try {
     const result =     await VoiceCall.insertOne({
-            name: analysis.structuredData.name,
-            customerNumber: customer.number,
-            voiceUrl: artifact.recordingUrl,
-            transcript: artifact.transcript,
-            summary: analysis.summary,
-            email: analysis.structuredData?.email,
+            name: analysis?.structuredData.name,
+            customerNumber: customer?.number,
+            voiceUrl: artifact?.recordingUrl,
+            transcript: artifact?.transcript,
+            summary: analysis?.summary,
+            email: analysis?.structuredData?.email,
             forwardFrom: analysis.structuredData?.forwardedFrom,
             toNumber: number,
             callDuration: durationMinutes,
