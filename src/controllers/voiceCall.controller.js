@@ -169,6 +169,10 @@ export const endCallReport =async (req,res) => {
     //     }) 
 
       console.log('db insert operation started');
+      console.log("🔍 Checking DB Connection...");
+console.log("DB Name:", VoiceCall?.dbName);
+console.log("Collection Name:", VoiceCall?.collectionName);
+
     const result =     await VoiceCall.insertOne({
       name: analysis?.structuredData.name,
       customerNumber: customer?.number,
