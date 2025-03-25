@@ -1,5 +1,6 @@
  // List of authorized forwarding users
  import { VoiceCall } from "../models/voiceCall.model.js";
+ import { connectToDatabase } from "../config/mongoose-connect.js";
  import twilio from 'twilio';
  import dotenv from 'dotenv';
  dotenv.config();
@@ -145,7 +146,7 @@ function formatToIST(utcDate) {
 
 
 export const endCallReport =async (req,res) => {
-    
+    await connectToDatabase();
     const  {analysis, artifact,customer,endedReason,startedAt,endedAt, durationMinutes,phoneNumber} = req.body.message
     // console.log('end of call report', req.body.message);
      console.log('analysis', analysis);

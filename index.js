@@ -312,7 +312,9 @@ app.post('/existing', async (req, res) => {
 
 
 
-app.listen(port,() => {
-     console.log('server listening on port 5000')
-      connectToDatabase();
-    })
+(async () => {
+  await connectToDatabase(); // Ensures DB is connected before starting the server
+  app.listen(port, () => {
+      console.log(`🚀 Server listening on port ${port}`);
+  });
+})();
