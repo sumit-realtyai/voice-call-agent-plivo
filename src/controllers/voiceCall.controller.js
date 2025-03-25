@@ -168,7 +168,8 @@ export const endCallReport =async (req,res) => {
             endedAt: formatToIST(endedAt),
         })     
     } catch (error) {
-        console.log('err', error);
+        console.log('end call error', error);
+        res.send('error in saving the call details');
     }
    
     res.json("end of call report received");

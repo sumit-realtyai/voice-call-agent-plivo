@@ -1,9 +1,11 @@
 import mongoose from "mongoose"
-const MONGODB_URI=`mongodb+srv://sumit:Custom_619@realtyai.giipx.mongodb.net/voice_assistant?retryWrites=true&w=majority`
+import dotenv from 'dotenv';
+dotenv.config();
+const mongodbUri = process.env.MONGODB_URI;
 
 export const connectToDatabase = async () => {
     try {
-        await mongoose.connect(MONGODB_URI, {
+        await mongoose.connect(mongodbUri, {
             useNewUrlParser: true,
             useUnifiedTopology: true,
         })
