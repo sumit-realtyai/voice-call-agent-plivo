@@ -147,13 +147,13 @@ function formatToIST(utcDate) {
 export const endCallReport =async (req,res) => {
     
     const  {analysis, artifact,customer,endedReason,startedAt,endedAt, durationMinutes,phoneNumber} = req.body.message
-    console.log('end of call report', req.body.message);
+    // console.log('end of call report', req.body.message);
      console.log('analysis', analysis);
     // console.log('recordird', artifact.recordingUrl);
     // console.log('customer', customer);
     const {number,provider} = phoneNumber;
     try {
-        await VoiceCall.insertOne({
+    const result =     await VoiceCall.insertOne({
             name: analysis.structuredData.name,
             customerNumber: customer.number,
             voiceUrl: artifact.recordingUrl,
@@ -166,13 +166,15 @@ export const endCallReport =async (req,res) => {
             endedReason,
             startedAt: formatToIST(startedAt),
             endedAt: formatToIST(endedAt),
-        })     
+        }) 
+        console.log('result', result);
+        res.json("end of call report received");        
     } catch (error) {
         console.log('end call error', error);
         res.send('error in saving the call details');
     }
    
-    res.json("end of call report received");
+    
 }
 
 
