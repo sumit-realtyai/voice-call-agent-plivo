@@ -168,7 +168,7 @@ export const endCallReport =async (req,res) => {
     //         endedAt: formatToIST(endedAt),
     //     }) 
 
-
+      console.log('db insert operation started');
     const result =     await VoiceCall.insertOne({
       name: analysis?.structuredData.name,
       customerNumber: customer?.number,
@@ -179,13 +179,13 @@ export const endCallReport =async (req,res) => {
       forwardFrom: analysis.structuredData?.forwardedFrom,
       toNumber: number,
 
-  }) 
+      }) 
 
         console.log('result', result);
         res.json("end of call report received");        
     } catch (error) {
         console.log('end call error', error);
-        res.send('error in saving the call details');
+        res.json({error , message: 'error in saving the call details'});
     }
    
     
